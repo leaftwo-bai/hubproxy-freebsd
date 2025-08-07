@@ -1,4 +1,4 @@
-# .github/workflows/build.yml
+# .github/workflows/freebsd-release.yml
 name: Build hubproxy FreeBSD
 
 on:
@@ -15,6 +15,13 @@ jobs:
       - name: Checkout workflow repo
         uses: actions/checkout@v4
 
+      - name: Download last built tag artifact
+        id: download_tag
+        uses: actions/download-artifact@v4
+        with:
+          name: last-built-tag
+        continue-on-error: true
+
       - name: Get latest upstream tag
         id: get_tag
         run: |
@@ -24,6 +31,20 @@ jobs:
           fi
           echo "UPSTREAM_TAG=$tag" >> $GITHUB_ENV
           echo "release_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Compare with last built tag
+        id: compare_tag
+        run: |
+          last_tag=""
+          if [ -f last_tag.txt ]; then
+            last_tag=$(cat last_tag.txt)
+          fi
+          echo "Last built tag: $last_tag"
+          echo "Current tag: ${{ env.UPSTREAM_TAG }}"
+          if [ "$last_tag" = "${{ env.UPSTREAM_TAG }}" ]; then
+            echo "No new release. Exiting."
+            exit 0
+          fi
 
       - name: Clone upstream hubproxy
         run: |
@@ -52,6 +73,15 @@ jobs:
         with:
           name: hubproxy-freebsd-amd64
           path: hubproxy/hubproxy-freebsd-amd64
+
+      - name: Save current tag for next run
+        run: echo "${{ env.UPSTREAM_TAG }}" > last_tag.txt
+
+      - name: Upload last built tag artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-built-tag
+          path: last_tag.txt
 
       - name: Create release
         uses: softprops/action-gh-release@v2
