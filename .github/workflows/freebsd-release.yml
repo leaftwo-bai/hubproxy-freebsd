@@ -1,40 +1,73 @@
-# .github/workflows/freebsd-release.yml
-name: Build FreeBSD amd64 Release
+# .github/workflows/build.yml
+name: Build hubproxy FreeBSD
 
 on:
-  push:
-    tags:
-      - 'v*'   # 只有打 tag 时才触发
-  workflow_dispatch:  # 也可以手动触发
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *' # 每天凌晨3点自动构建
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Build hubproxy FreeBSD
 
     steps:
-      - name: Checkout code
+      - name: Checkout workflow repo
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'  
+      - name: Get latest upstream tag
+        id: get_tag
+        run: |
+          tag=$(wget -qO- https://api.github.com/repos/sky22333/hubproxy/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+' || echo "")
+          if [ -z "$tag" ]; then
+            tag="main"
+          fi
+          echo "UPSTREAM_TAG=$tag" >> $GITHUB_ENV
+          echo "release_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Clone upstream hubproxy
+        run: |
+          if [ "${{ env.UPSTREAM_TAG }}" = "main" ]; then
+            git clone --depth 1 https://github.com/sky22333/hubproxy.git
+          else
+            git clone --depth 1 --branch "${{ env.UPSTREAM_TAG }}" https://github.com/sky22333/hubproxy.git
+          fi
 
       - name: Build FreeBSD amd64 binary
-        run: |
-          mkdir -p dist
-          GOOS=freebsd GOARCH=amd64 go build -o dist/hubproxy-freebsd-amd64
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          release: 13.2
+          prepare: |
+            pkg install -y wget curl git gcc bash gawk gsed
+            wget https://dl.google.com/go/go1.24.0.freebsd-amd64.tar.gz && tar -C /usr/local -xzf go1.24.0.freebsd-amd64.tar.gz && rm go1.24.0.freebsd-amd64.tar.gz
+            ln -s /usr/local/go/bin/go /usr/local/bin/go
+          run: |
+            cd hubproxy/src
+            go mod download
+            GOOS=freebsd GOARCH=amd64 go build -ldflags "-s -w" -o ../hubproxy-freebsd-amd64 || (echo "Build failed" && exit 1)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: hubproxy-freebsd-amd64
-          path: dist/hubproxy-freebsd-amd64
+          path: hubproxy/hubproxy-freebsd-amd64
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create release
         uses: softprops/action-gh-release@v2
-        with:
-          files: dist/hubproxy-freebsd-amd64
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_tag.outputs.release_tag }}
+          name: hubproxy ${{ steps.get_tag.outputs.release_tag }}
+          files: |
+            hubproxy/hubproxy-freebsd-amd64
+
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 1
+          keep_minimum_runs: 8
