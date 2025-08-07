@@ -45,7 +45,7 @@ jobs:
           run: |
             cd hubproxy/src
             go mod download
-            GOOS=freebsd GOARCH=amd64 go build -ldflags "-s -w" -o ../hubproxy-freebsd-amd64 || (echo "Build failed" && exit 1)
+            GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "-s -w" -o ../hubproxy-freebsd-amd64 || (echo "Build failed" && exit 1)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
